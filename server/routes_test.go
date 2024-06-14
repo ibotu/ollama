@@ -275,7 +275,6 @@ func Test_Routes(t *testing.T) {
 	}
 
 	t.Setenv("OLLAMA_MODELS", t.TempDir())
-	envconfig.LoadConfig()
 
 	s := &Server{}
 	router := s.GenerateRoutes()
@@ -306,7 +305,6 @@ func Test_Routes(t *testing.T) {
 
 func TestCase(t *testing.T) {
 	t.Setenv("OLLAMA_MODELS", t.TempDir())
-	envconfig.LoadConfig()
 
 	cases := []string{
 		"mistral",
