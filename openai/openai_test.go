@@ -112,6 +112,72 @@ func TestMiddlewareRequests(t *testing.T) {
 				}
 			},
 		},
+		{
+			Name:    "embed handler single input",
+			Method:  http.MethodPost,
+			Path:    "/api/embed",
+			Handler: EmbedMiddleware,
+			Setup: func(t *testing.T, req *http.Request) {
+				body := EmbedRequest{
+					Input: "Hello",
+					Model: "test-model",
+				}
+
+				bodyBytes, _ := json.Marshal(body)
+
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+			},
+			Expected: func(t *testing.T, req *http.Request) {
+				var embedReq api.EmbedRequest
+				if err := json.NewDecoder(req.Body).Decode(&embedReq); err != nil {
+					t.Fatal(err)
+				}
+
+				if embedReq.Input != "Hello" {
+					t.Fatalf("expected 'Hello', got %s", embedReq.Input)
+				}
+
+				if embedReq.Model != "test-model" {
+					t.Fatalf("expected 'test-model', got %s", embedReq.Model)
+				}
+			},
+		},
+		{
+			Name:    "embed handler batch input",
+			Method:  http.MethodPost,
+			Path:    "/api/embed",
+			Handler: EmbedMiddleware,
+			Setup: func(t *testing.T, req *http.Request) {
+				body := EmbedRequest{
+					Input: []string{"Hello", "World"},
+					Model: "test-model",
+				}
+
+				bodyBytes, _ := json.Marshal(body)
+
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+			},
+			Expected: func(t *testing.T, req *http.Request) {
+				var embedReq api.EmbedRequest
+				if err := json.NewDecoder(req.Body).Decode(&embedReq); err != nil {
+					t.Fatal(err)
+				}
+
+				if embedReq.Input[0] != "Hello" {
+					t.Fatalf("expected 'Hello', got %s", embedReq.Input[0])
+				}
+
+				if embedReq.Input[1] != "World" {
+					t.Fatalf("expected 'World', got %s", embedReq.Input[1])
+				}
+
+				if embedReq.Model != "test-model" {
+					t.Fatalf("expected 'test-model', got %s", embedReq.Model)
+				}
+			},
+		},
 	}
 
 	gin.SetMode(gin.TestMode)
@@ -255,60 +321,6 @@ func TestMiddlewareResponses(t *testing.T) {
 
 				if len(embeddingResp.Data) != 1 {
 					t.Fatalf("expected 1 embedding, got %d", len(embeddingResp.Data))
-				}
-
-				if embeddingResp.Data[0].Object != "embedding" {
-					t.Fatalf("expected embedding, got %s", embeddingResp.Data[0].Object)
-				}
-
-				if embeddingResp.Data[0].Embedding[0] != 0.1 {
-					t.Fatalf("expected 0.1, got %f", embeddingResp.Data[0])
-				}
-
-				if embeddingResp.Model != "test-model" {
-					t.Fatalf("expected test-model, got %s", embeddingResp.Model)
-				}
-			},
-		},
-		{
-			Name:     "embedding handler (batch embedding)",
-			Method:   http.MethodPost,
-			Path:     "/api/embed",
-			TestPath: "/api/embed",
-			Handler:  EmbedMiddleware,
-			Endpoint: func(c *gin.Context) {
-				c.JSON(http.StatusOK, api.EmbedResponse{
-					Model: "test-model",
-					Embeddings: [][]float64{
-						{0.1, 0.2, 0.3},
-						{0.4, 0.5, 0.6},
-						{0.7, 0.8, 0.9},
-					},
-				})
-			},
-			Setup: func(t *testing.T, req *http.Request) {
-				body := EmbedRequest{
-					Input: []string{"Hello", "World", "Ollama"},
-					Model: "test-model",
-				}
-
-				bodyBytes, _ := json.Marshal(body)
-
-				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-			},
-			Expected: func(t *testing.T, resp *httptest.ResponseRecorder) {
-				var embeddingResp EmbeddingList
-				if err := json.NewDecoder(resp.Body).Decode(&embeddingResp); err != nil {
-					t.Fatal(err)
-				}
-
-				if embeddingResp.Object != "list" {
-					t.Fatalf("expected list, got %s", embeddingResp.Object)
-				}
-
-				if len(embeddingResp.Data) != 3 {
-					t.Fatalf("expected 3 embeddings, got %d", len(embeddingResp.Data))
 				}
 
 				if embeddingResp.Data[0].Object != "embedding" {
