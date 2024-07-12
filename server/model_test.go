@@ -3,15 +3,20 @@ package server
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/ollama/ollama/api"
+	"github.com/ollama/ollama/template"
 )
 
 func createZipFile(t *testing.T, name string) *os.File {
@@ -107,6 +112,123 @@ func TestExtractFromZipFile(t *testing.T) {
 			if !slices.Equal(actual, tt.expect) {
 				t.Fatalf("expected %d files, got %d", len(tt.expect), len(matches))
 			}
+		})
+	}
+}
+
+type function struct {
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
+}
+
+func readFile(t *testing.T, base, name string) *bytes.Buffer {
+	t.Helper()
+
+	bts, err := os.ReadFile(filepath.Join(base, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return bytes.NewBuffer(bts)
+}
+
+func TestExecuteWithTools(t *testing.T) {
+	p := filepath.Join("testdata", "tools")
+	cases := map[string]string{
+		"mistral": `[TOOL_CALLS]  [{"name": "get_current_weather", "arguments": {"format":"fahrenheit","location":"San Francisco, CA"}},{"name": "get_current_weather", "arguments": {"format":"celsius","location":"Toronto, Canada"}}]`,
+		"command-r-plus": "Action: ```json" + `
+[
+    {
+        "tool_name": "get_current_weather",
+        "parameters": {
+            "format": "fahrenheit",
+            "location": "San Francisco, CA"
+        }
+    },
+    {
+        "tool_name": "get_current_weather",
+        "parameters": {
+            "format": "celsius",
+            "location": "Toronto, Canada"
+        }
+    }
+]
+` + "```",
+		"firefunction": ` functools[{"name": "get_current_weather", "arguments": {"format":"fahrenheit","location":"San Francisco, CA"}},{"name": "get_current_weather", "arguments": {"format":"celsius","location":"Toronto, Canada"}}]`,
+	}
+
+	var tools []api.Tool
+	if err := json.Unmarshal(readFile(t, p, "tools.json").Bytes(), &tools); err != nil {
+		t.Fatal(err)
+	}
+
+	var messages []api.Message
+	if err := json.Unmarshal(readFile(t, p, "messages.json").Bytes(), &messages); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := []api.ToolCall{
+		{
+			Type: "function",
+			Function: function{
+				Name: "get_current_weather",
+				Arguments: map[string]any{
+					"format":   "fahrenheit",
+					"location": "San Francisco, CA",
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: function{
+				Name: "get_current_weather",
+				Arguments: map[string]any{
+					"format":   "celsius",
+					"location": "Toronto, Canada",
+				},
+			},
+		},
+	}
+
+	template.Now = func() time.Time {
+		t.Helper()
+		return time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
+	}
+
+	for tt, resp := range cases {
+		t.Run(tt, func(t *testing.T) {
+			tmpl, err := template.Parse(readFile(t, p, fmt.Sprintf("%s.gotmpl", tt)).String())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Run("template", func(t *testing.T) {
+				var actual bytes.Buffer
+				if err := tmpl.Execute(&actual, template.Values{Tools: tools, Messages: messages}); err != nil {
+					t.Fatal(err)
+				}
+
+				if diff := cmp.Diff(actual.String(), readFile(t, p, fmt.Sprintf("%s.out", tt)).String()); diff != "" {
+					t.Errorf("mismatch (-got +want):\n%s", diff)
+				}
+			})
+
+			t.Run("parse", func(t *testing.T) {
+				m := &Model{Template: tmpl}
+				actual, ok := m.parseToolCalls(resp)
+				if !ok {
+					t.Fatal("failed to parse tool calls")
+				}
+
+				for i := range actual {
+					// ID is randomly generated so clear it for comparison
+					actual[i].ID = ""
+				}
+
+				if diff := cmp.Diff(actual, calls); diff != "" {
+					t.Errorf("mismatch (-got +want):\n%s", diff)
+				}
+			})
 		})
 	}
 }
